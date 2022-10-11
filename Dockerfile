@@ -1,7 +1,7 @@
 #
 # baseimage Dockerfile
 #
-# https://github.com/jlesage/docker-baseimage
+# Forked from https://github.com/jlesage/docker-baseimage
 #
 
 ARG BASEIMAGE=unknown
@@ -139,5 +139,5 @@ LABEL \
       org.label-schema.name="baseimage" \
       org.label-schema.description="A minimal docker baseimage to ease creation of long-lived application containers" \
       org.label-schema.version="${IMAGE_VERSION}" \
-      org.label-schema.vcs-url="https://github.com/jlesage/docker-baseimage" \
+      org.label-schema.vcs-url="https://github.com/quarry8282/docker-baseimage" \
       org.label-schema.schema-version="1.0"

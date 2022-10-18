@@ -33,25 +33,6 @@ jobs:
           - '{ "tag_prefix": "alpine-edge",  "baseimage": "alpine:edge",    "platforms": "linux/amd64" }'
 
     steps:
-      - name: Free disk space
-        run: |
-          # Free disk space.
-          echo "::group::Before"
-          df -h /
-          echo "::endgroup::"
-          echo "::group::Removing unneeded softwares and files..."
-          for DIR in /usr/local/lib/android /usr/share/dotnet /opt/ghc
-          do
-            if [ -d "$DIR" ]; then
-                echo "Removing $DIR..."
-                sudo rm -r "$DIR"
-            fi
-          done
-          echo "::endgroup::"
-          echo "::group::After"
-          df -h /
-          echo "::endgroup::"
-
       - name: Prepare
         id: prep
         run: |

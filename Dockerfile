@@ -30,7 +30,8 @@ RUN apk --no-cache add build-base git bash perl ucl-dev zlib-dev zlib-static && 
     git -C /tmp/upx checkout f75ad8b && \
     git -C /tmp/upx submodule init && \
     git -C /tmp/upx submodule update --recursive && \
-    make LDFLAGS=-static CXXFLAGS_OPTIMIZE= -C /tmp/upx -j$(nproc) all
+    make LDFLAGS=-static CXXFLAGS_OPTIMIZE= -C /tmp/upx -j$(nproc) all && \
+    cp -v /tmp/upx/src/upx.out /usr/bin/upx
 
 # Build the init system and process supervisor.
 FROM --platform=$BUILDPLATFORM alpine:3.15 AS cinit
@@ -42,12 +43,13 @@ RUN xx-apk --no-cache add gcc musl-dev
 RUN CC=xx-clang \
     make -C /tmp/cinit
 RUN xx-verify --static /tmp/cinit/cinit
-COPY --from=upx /tmp/upx/src/upx.out /usr/bin/upx
+COPY --from=upx /usr/bin/upx /usr/bin/upx
 RUN upx /tmp/cinit/cinit
 
 # Build the log monitor.
 FROM --platform=$BUILDPLATFORM alpine:3.15 AS logmonitor
 ARG TARGETPLATFORM
+ARG TARGETARCH
 COPY --from=xx / /
 COPY src/logmonitor /tmp/logmonitor
 RUN apk --no-cache add make clang
@@ -55,8 +57,8 @@ RUN xx-apk --no-cache add gcc musl-dev linux-headers
 RUN CC=xx-clang \
     make -C /tmp/logmonitor
 RUN xx-verify --static /tmp/logmonitor/logmonitor
-COPY --from=upx /tmp/upx/src/upx.out /usr/bin/upx
-RUN upx /tmp/logmonitor/logmonitor
+COPY --from=upx /usr/bin/upx /usr/bin/upx
+RUN if [ "$TARGETARCH" != "arm64" ]; then upx /tmp/logmonitor/logmonitor; fi
 
 # Build su-exec
 FROM --platform=$BUILDPLATFORM alpine:3.15 AS su-exec
@@ -71,11 +73,12 @@ RUN CC=xx-clang \
     LDFLAGS="-static -Wl,--strip-all" \
     make -C /tmp/su-exec
 RUN xx-verify --static /tmp/su-exec/su-exec
-COPY --from=upx /tmp/upx/src/upx.out /usr/bin/upx
+COPY --from=upx /usr/bin/upx /usr/bin/upx
 RUN upx /tmp/su-exec/su-exec
 
 # Pull base image.
 FROM ${BASEIMAGE}
+ARG TARGETPLATFORM
 
 # Define working directory.
 WORKDIR /tmp
@@ -113,6 +116,11 @@ RUN \
 
 # Add files.
 COPY rootfs/ /
+
+# Set internal environment variables.
+RUN \
+    set-cont-env DOCKER_IMAGE_PLATFORM "${TARGETPLATFORM:-}" && \
+    true
 
 # Set environment variables.
 ENV \

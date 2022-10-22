@@ -17,6 +17,18 @@ baseimage:
     long-lived application.
   gui: false
   history:
+    - version: 3.1.2
+      date: 2022-10-21
+      changes:
+        fixed:
+          - 'A umask value of `0000` was not properly applied.'
+    - version: 3.1.1
+      date: 2022-10-21
+      changes:
+        changed:
+          - 'Include the Docker image platform in the informational box printed during container startup.'
+        fixed:
+          - 'Logmonitor crash on arm64 platform.'
     - version: 3.1.0
       date: 2022-10-16
       changes:
@@ -28,18 +40,18 @@ baseimage:
       date: 2022-10-10
       changes:
         fixed:
-          - 'Fixed issue where taking ownership of `/config` containing no file would fail.'
+          - 'Issue where taking ownership of `/config` containing no file would fail.'
     - version: 3.0.2
       date: 2022-10-10
       changes:
         fixed:
-          - 'Fixed taking ownership of `/config` when on of its subfolder is mapped to a network share.'
+          - 'Issue taking ownership of `/config` when one of its subfolder is mapped to a network share.'
           - 'Make sure to always set supplementary groups of services, even if the list is empty.'
     - version: 3.0.1
       date: 2022-10-07
       changes:
         fixed:
-          - 'Any defined parameters were not passed to `startapp.sh`.'
+          - 'Defined parameters for the `app` service were not passed to `startapp.sh`.'
     - version: 3.0.0
       date: 2022-10-05
       changes:
@@ -227,6 +239,10 @@ container:
       default:
     - name: DOCKER_IMAGE_VERSION
       description: Version of the Docker image that implements the application.
+      type: internal
+      default:
+    - name: DOCKER_IMAGE_PLATFORM
+      description: Platform (OS / CPU architecture) of the Docker image that implements the application.
       type: internal
       default:
     - name: HOME

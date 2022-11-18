@@ -30,7 +30,7 @@ RUN apk --no-cache add build-base git bash perl ucl-dev zlib-dev zlib-static && 
     git -C /tmp/upx checkout v4.0.1 && \
     git -C /tmp/upx submodule init && \
     git -C /tmp/upx submodule update --recursive && \
-    make LDFLAGS=-static CXXFLAGS_OPTIMIZE= -C /tmp/upx -j$(nproc) all && \
+    make LDFLAGS=-static CXXFLAGS_OPTIMIZE= -C /tmp/upx -j$(nproc) && \
     cp -v /tmp/upx/build/release/upx /usr/bin/upx
 
 # Build the init system and process supervisor.

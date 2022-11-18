@@ -31,7 +31,7 @@ RUN apk --no-cache add build-base git bash perl ucl-dev zlib-dev zlib-static && 
     git -C /tmp/upx submodule init && \
     git -C /tmp/upx submodule update --recursive && \
     make LDFLAGS=-static CXXFLAGS_OPTIMIZE= -C /tmp/upx -j$(nproc) all && \
-    cp -v /tmp/upx/src/upx.out /usr/bin/upx
+    cp -v /tmp/upx/build/release/upx /usr/bin/upx
 
 # Build the init system and process supervisor.
 FROM --platform=$BUILDPLATFORM alpine:3.15 AS cinit

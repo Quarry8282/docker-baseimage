@@ -27,7 +27,7 @@ FROM --platform=$BUILDPLATFORM tonistiigi/xx AS xx
 FROM --platform=$BUILDPLATFORM alpine:3.15 AS upx
 RUN apk --no-cache add build-base git bash perl ucl-dev zlib-dev zlib-static && \
     git clone https://github.com/upx/upx.git /tmp/upx && \
-    git -C /tmp/upx checkout f75ad8b && \
+    git -C /tmp/upx checkout v4.0.1 && \
     git -C /tmp/upx submodule init && \
     git -C /tmp/upx submodule update --recursive && \
     make LDFLAGS=-static CXXFLAGS_OPTIMIZE= -C /tmp/upx -j$(nproc) all && \

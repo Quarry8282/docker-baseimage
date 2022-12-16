@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1.4
 #
 # baseimage Dockerfile
 #
@@ -22,16 +23,12 @@ ARG DEBIAN_PKGS="\
 FROM --platform=$BUILDPLATFORM tonistiigi/xx AS xx
 
 # Build UPX.
-# NOTE: The latest official release of UPX (version 3.96) produces binaries that
-# crash on ARM.  We need to manually compile it with all latest fixes.
 FROM --platform=$BUILDPLATFORM alpine:3.15 AS upx
-RUN apk --no-cache add build-base cmake git bash perl ucl-dev zlib-dev zlib-static && \
-    git clone https://github.com/upx/upx.git /tmp/upx && \
-    git -C /tmp/upx checkout v4.0.1 && \
-    git -C /tmp/upx submodule init && \
-    git -C /tmp/upx submodule update --recursive && \
-    make LDFLAGS=-static CXXFLAGS_OPTIMIZE= -C /tmp/upx -j$(nproc) && \
-    cp -v /tmp/upx/build/release/upx /usr/bin/upx
+RUN apk --no-cache add build-base curl make cmake git && \
+    mkdir /tmp/upx && \
+    curl -# -L https://github.com/upx/upx/releases/download/v4.0.1/upx-4.0.1-src.tar.xz | tar xJ --strip 1 -C /tmp/upx && \
+    make -C /tmp/upx build/release-gcc -j$(nproc) && \
+    cp -v /tmp/upx/build/release-gcc/upx /usr/bin/upx
 
 # Build the init system and process supervisor.
 FROM --platform=$BUILDPLATFORM alpine:3.15 AS cinit
@@ -58,7 +55,7 @@ RUN CC=xx-clang \
     make -C /tmp/logmonitor
 RUN xx-verify --static /tmp/logmonitor/logmonitor
 COPY --from=upx /usr/bin/upx /usr/bin/upx
-RUN if [ "$TARGETARCH" != "arm64" ]; then upx /tmp/logmonitor/logmonitor; fi
+RUN upx /tmp/logmonitor/logmonitor
 
 # Build su-exec
 FROM --platform=$BUILDPLATFORM alpine:3.15 AS su-exec
@@ -83,26 +80,33 @@ ARG TARGETPLATFORM
 # Define working directory.
 WORKDIR /tmp
 
-# Copy helpers.
-COPY helpers/* /usr/bin/
-
 # Install the init system and process supervisor.
-COPY --from=cinit /tmp/cinit/cinit /usr/sbin/
+COPY --link --from=cinit /tmp/cinit/cinit /opt/base/sbin/
 
 # Install the log monitor.
-COPY --from=logmonitor /tmp/logmonitor/logmonitor /usr/bin/
+COPY --link --from=logmonitor /tmp/logmonitor/logmonitor /opt/base/bin/
 
 # Install su-exec.
-COPY --from=su-exec /tmp/su-exec/su-exec /usr/sbin/su-exec
+COPY --link --from=su-exec /tmp/su-exec/su-exec /opt/base/sbin/su-exec
+
+# Copy helpers.
+COPY helpers/* /opt/base/bin/
 
 # Install system packages.
 ARG ALPINE_PKGS
 ARG DEBIAN_PKGS
 RUN \
     if [ -n "$(which apk)" ]; then \
-        add-pkg ${ALPINE_PKGS}; \
+        /opt/base/bin/add-pkg ${ALPINE_PKGS}; \
     else \
-        add-pkg ${DEBIAN_PKGS}; \
+        /opt/base/bin/add-pkg ${DEBIAN_PKGS}; \
+    fi
+
+# Load our RC file when logging in to the container.
+RUN \
+    if [ -f /root/.profile ]; then \
+        echo "# Include Docker container definitions." >> /root/.profile && \
+        echo ". /root/.docker_rc" >> /root/.profile; \
     fi
 
 # Make sure all required directory exists.
@@ -119,11 +123,13 @@ COPY rootfs/ /
 
 # Set internal environment variables.
 RUN \
-    set-cont-env DOCKER_IMAGE_PLATFORM "${TARGETPLATFORM:-}" && \
+    /opt/base/bin/set-cont-env DOCKER_IMAGE_PLATFORM "${TARGETPLATFORM:-}" && \
     true
 
 # Set environment variables.
 ENV \
+    PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/base/sbin:/opt/base/bin \
+    ENV=/root/.docker_rc \
     USER_ID=1000 \
     GROUP_ID=1000 \
     SUP_GROUP_IDS= \

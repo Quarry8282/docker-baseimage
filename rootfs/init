@@ -3,6 +3,10 @@
 set -e # Exit immediately if a command exits with a non-zero status.
 set -u # Treat unset variables as an error.
 
+# Make sure to use our own `PATH` value, ignoring the one that could have been
+# set during creation of the container.
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/base/sbin:/opt/base/bin
+
 STAGE=init
 
 MIN_LOG_PREFIX_LENGTH=12
@@ -58,6 +62,7 @@ load_env_var() {
     VAR_TEST="$(eval echo \$\{$VAR_NAME+x\})"
     if [ -z "$VAR_TEST" ]; then
         export "$VAR_NAME"="$VAR_VAL"
+        echo "export $VAR_NAME=\"$VAR_VAL\"" >> /var/tmp/.cont-env-internal
     fi
 }
 
@@ -197,11 +202,11 @@ CINIT_ARGS="--progname supervisor \
     --default-service-gid $GROUP_ID \
 "
 
-if [ "${CONTAINER_DEBUG:-0}" -eq 1 ]; then
+if is-bool-val-true "${CONTAINER_DEBUG:-0}"; then
     CINIT_ARGS="$CINIT_ARGS --debug"
 fi
 
 log "giving control to process supervisor."
-exec /usr/sbin/cinit $CINIT_ARGS
+exec /opt/base/sbin/cinit $CINIT_ARGS
 
 # vim:ft=sh:ts=4:sw=4:et:sts=4

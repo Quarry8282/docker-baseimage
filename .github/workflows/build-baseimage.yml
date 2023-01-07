@@ -112,6 +112,7 @@ jobs:
         uses: docker/build-push-action@v3
         with:
           push: true
+          pull: true
           platforms: ${{ fromJSON(matrix.info).platforms }}
           tags: localhost:5000/${{ env.DOCKER_IMAGE_NAME }}:github-ci
           build-args: |
@@ -155,10 +156,10 @@ jobs:
         uses: docker/build-push-action@v3
         with:
           push: true
-          pull: true
           platforms: ${{ fromJSON(matrix.info).platforms }}
           tags: ${{ steps.prep.outputs.tags }}
           build-args: |
             BASEIMAGE=${{ fromJSON(matrix.info).baseimage }}
             IMAGE_VERSION=${{ steps.prep.outputs.label_version }}
           cache-from: type=gha,scope=${{ fromJSON(matrix.info).tag_prefix }}
+

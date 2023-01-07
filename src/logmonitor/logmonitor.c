@@ -36,8 +36,9 @@
 
 #define MAIN_LOOP_SLEEP_PERIOD 1
 
-#define MAX_NUM_MONITORED_FILES 16
 #define MAX_NUM_NOTIFICATIONS 16
+#define MAX_NUM_MONITORED_FILES_PER_NOTIFICATION 4
+#define MAX_NUM_MONITORED_FILES (MAX_NUM_NOTIFICATIONS * MAX_NUM_MONITORED_FILES_PER_NOTIFICATION)
 #define MAX_NUM_TARGETS 16
 
 #define MAX_READ_FILE_SIZE (100 * 1024) /* 100KB */
@@ -87,6 +88,12 @@ typedef struct {
 
     char *level;
     bool is_level_exe;
+
+    unsigned char num_monitored_files;
+    struct {
+        char *path;
+        bool is_status;
+    } monitored_files[MAX_NUM_MONITORED_FILES_PER_NOTIFICATION];
 } lm_notification_t;
 
 typedef struct {
@@ -119,6 +126,16 @@ typedef struct {
     unsigned char num_targets;
     lm_target_t *targets[MAX_NUM_TARGETS];
 } lm_context_t;
+
+static void handle_sigchld(int sig) {
+    /* Do nothing here.*/
+}
+
+static void reap_children() {
+    int saved_errno = errno;
+    while (waitpid((pid_t)(-1), 0, WNOHANG) > 0) { }
+    errno = saved_errno;
+}
 
 static time_t get_time()
 {
@@ -404,6 +421,39 @@ static int invoke_exec(const char *exec, const char *args[], unsigned int num_ar
     return retval;
 }
 
+static int invoke_exec_no_wait(const char *exec, const char *args[], unsigned int num_args)
+{
+    int retval = LM_SUCCESS;
+    pid_t pid;
+
+    // Fork.
+    if (IS_SUCCESS(retval)) {
+        pid = fork();
+        if (pid == -1) {
+            SET_ERROR(retval, "Fork failed: %s.", strerror(errno));
+        }
+    }
+
+    // Handle child.
+    if (IS_SUCCESS(retval)) {
+        if (pid == 0) {
+            const char *all_args[num_args + 2];
+
+            all_args[0] = exec;
+            for (int i = 1; i <= num_args; i++) {
+                all_args[i] = args[i-1];
+            }
+            all_args[num_args + 1] = NULL;
+
+            if (execv(exec, (char *const *)all_args) == -1) {
+                exit(127);
+            }
+        }
+    }
+
+    return retval;
+}
+
 static int invoke_filter(const char *filter_exe, const char *line)
 {
     int retval = LM_SUCCESS;
@@ -422,21 +472,29 @@ static int invoke_target(const char *send_exe, const char *title, const char *de
 {
     int retval = LM_SUCCESS;
     const char *args[] = { title, desc, level };
-    int exit_code;
 
-    retval = invoke_exec(send_exe, args, DIM(args), &exit_code, NULL, 0);
-    if (IS_SUCCESS(retval)) {
-        return (exit_code == 0) ? LM_SUCCESS : LM_ERROR;
-    }
+    retval = invoke_exec_no_wait(send_exe, args, DIM(args));
 
     return retval;
 }
 
-static void handle_line(lm_context_t *ctx, char *buf)
+static void handle_line(lm_context_t *ctx, unsigned int mfid, char *buf)
 {
 #define BUFFER_SIZE 512
 
     FOR_EACH_NOTIFICATION(ctx, notif, nidx) {
+        // Skip this notification if not for the monitored file.
+        bool skip = true;
+        for (int i = 0; i < notif->num_monitored_files; i++) {
+            if (strcmp(notif->monitored_files[i].path, ctx->monitored_files[mfid].path) == 0) {
+                skip = false;
+                break;
+            }
+        }
+        if (skip) {
+            continue;
+        }
+
         DEBUG("Invoking filter for notification '%s'...", notif->name);
         if (invoke_filter(notif->filter, buf) == LM_SUCCESS) {
             char *title = NULL;
@@ -661,7 +719,7 @@ static void handle_read(lm_context_t *ctx, unsigned int mfid, char *buf)
 
         // Handle the line.
         if (strlen(work_buf) > 0) {
-            handle_line(ctx, work_buf);
+            handle_line(ctx, mfid, work_buf);
         }
 
         // Handle the next potential line.
@@ -684,6 +742,12 @@ static void free_notification(lm_notification_t *notif) {
         if (notif->title) free(notif->title);
         if (notif->desc) free(notif->desc);
         if (notif->level) free(notif->level);
+
+        for (int i = 0; i < notif->num_monitored_files; i++) {
+            if (notif->monitored_files[i].path) {
+                free(notif->monitored_files[i].path);
+            }
+        }
 
         memset(notif, 0, sizeof(*notif));
         free(notif);
@@ -801,6 +865,61 @@ static lm_notification_t *alloc_notification(const char *notifications_dir, cons
                 }
             }
         }
+        else if (strcmp(de->d_name, "source") == 0) {
+            char *mfp = file2str(filepath);
+            if (mfp) {
+                char *token = strtok(mfp, "\n");
+                while (token != NULL) {
+                    bool is_status = false;
+
+                    if (strlen(token) == 0) {
+                        continue;
+                    }
+
+                    if (strncmp(token, "log:", strlen("log:")) == 0) {
+                        is_status = false;
+                        token += strlen("log:");
+                    }
+                    else if (strncmp(token, "status:", strlen("status:")) == 0) {
+                        is_status = true;
+                        token += strlen("status:");
+                    }
+
+                    if (strlen(token) == 0) {
+                        SET_ERROR(retval, "Source file path is empty.");
+                        break;
+                    }
+                    else if (token[0] != '/') {
+                        SET_ERROR(retval, "Source file path is not absolute.");
+                        break;
+                    }
+
+                    if (notif->num_monitored_files < DIM(notif->monitored_files)) {
+                        notif->monitored_files[notif->num_monitored_files].path = strdup(token);
+                        notif->monitored_files[notif->num_monitored_files].is_status = is_status;
+
+                        if (!notif->monitored_files[notif->num_monitored_files].path) {
+                            SET_ERROR(retval, "Failed to alloc memory for monitored file path.");
+                            break;
+                        }
+
+                        notif->num_monitored_files++;
+                    }
+                    else {
+                        SET_ERROR(retval, "Maximum number of monitored files reached.");
+                        break;
+                    }
+
+                    token = strtok(NULL, "\n");
+                }
+
+                free(mfp);
+                mfp = NULL;
+            }
+            else {
+                SET_ERROR(retval, "Failed to read notification monitored file path.");
+            }
+        }
 
         if (filepath) {
             free(filepath);
@@ -826,6 +945,9 @@ static lm_notification_t *alloc_notification(const char *notifications_dir, cons
         }
         else if (strlen(notif->level) == 0) {
             SET_ERROR(retval, "Level missing for notification defined at '%s'", notification_dir);
+        }
+        else if (notif->num_monitored_files == 0) {
+            SET_ERROR(retval, "At least one file to monitor must be specified.");
         }
     }
 
@@ -1104,7 +1226,7 @@ static void destroy_context(lm_context_t *ctx)
     }
 }
 
-static lm_context_t *create_context(const char *cfgdir, char **monitored_files, unsigned short num_monitored_files)
+static lm_context_t *create_context(const char *cfgdir)
 {
     int retval = LM_SUCCESS;
     lm_context_t *ctx = NULL;
@@ -1149,37 +1271,45 @@ static lm_context_t *create_context(const char *cfgdir, char **monitored_files, 
         }
     }
 
-    if (IS_SUCCESS(retval)) {
-        if (num_monitored_files > DIM(ctx->monitored_files)) {
-            SET_ERROR(retval, "Too many files to monitor.");
-        }
-    }
-
     // Set monitored files.
     if (IS_SUCCESS(retval)) {
-        for (int i = 0; i < num_monitored_files; ++i) {
-            const char *fpath = monitored_files[i];
+        FOR_EACH_NOTIFICATION(ctx, notif, nidx) {
+            for (int i = 0; i < notif->num_monitored_files; i++) {
+                bool exists = false;
 
-            // Determine if it's a status file.
-            if (fpath[0] == 's' && fpath[1] == ':') {
-                fpath += 2;
-                ctx->monitored_files[i].is_status = true;
-            }
-            else {
-                ctx->monitored_files[i].is_status = false;
+                FOR_EACH_MONITORED_FILE(ctx, mf, mfidx) {
+                    if (strcmp(mf->path, notif->monitored_files[i].path) == 0) {
+                        if (mf->is_status == notif->monitored_files[i].is_status) {
+                            exists = true;
+                        }
+                        else {
+                            SET_ERROR(retval, "Monitored file defined multiple times with different types: %s.", mf->path);
+                        }
+                        break;
+                    }
+                }
+
+                if (IS_SUCCESS(retval) && !exists) {
+                    ctx->monitored_files[ctx->num_monitored_files].fd = -1;
+                    ctx->monitored_files[ctx->num_monitored_files].is_status = notif->monitored_files[i].is_status;
+                    ctx->monitored_files[ctx->num_monitored_files].path = strdup(notif->monitored_files[i].path);
+
+                    if (!ctx->monitored_files[ctx->num_monitored_files].path) {
+                        SET_ERROR(retval, "Failed to alloc memory for monitored file path.");
+                        break;
+                    }
+
+                    ctx->num_monitored_files++;
+                }
+                else if (IS_ERROR(retval)) {
+                    break;
+                }
             }
 
-            // Set path.
-            ctx->monitored_files[i].path = strdup(fpath);
-            if (!ctx->monitored_files[i].path) {
-                SET_ERROR(retval, "Failed to alloc memory for monitored file path.");
+            if (IS_ERROR(retval)) {
                 break;
             }
-
-            // Init fd;
-            ctx->monitored_files[i].fd = -1;
         }
-        ctx->num_monitored_files = num_monitored_files;
     }
 
     if (IS_ERROR(retval)) {
@@ -1193,10 +1323,6 @@ static lm_context_t *create_context(const char *cfgdir, char **monitored_files, 
 static void usage(void)
 {
     fprintf(stderr, "Usage: logmonitor [OPTIONS...] FILE [FILE...]\n");
-    fprintf(stderr, "\n");
-    fprintf(stderr, "Arguments:\n");
-    fprintf(stderr, "  FILE                    Path to the file(s) to be monitored. Prefix\n");
-    fprintf(stderr, "                          with 's:' for status files.\n");
     fprintf(stderr, "\n");
     fprintf(stderr, "Options:\n");
     fprintf(stderr, "  -c, --configdir         Directory where configuration is stored (default: "DEFAULT_CONFIG_DIR").\n");
@@ -1234,9 +1360,20 @@ int main(int argc, char **argv)
         }
     }
 
-    // Create context;
+    // Set SIGCHLD handler.
     if (IS_SUCCESS(retval)) {
-        ctx = create_context(cfgdir, argv+optind, argc - optind);
+        struct sigaction sa;
+        sa.sa_handler = &handle_sigchld;
+        sigemptyset(&sa.sa_mask);
+        sa.sa_flags = SA_RESTART | SA_NOCLDSTOP;
+        if (sigaction(SIGCHLD, &sa, 0) == -1) {
+            SET_ERROR(retval, "Failed to set signal handler: %s.", strerror(errno));
+        }
+    }
+
+    // Create context.
+    if (IS_SUCCESS(retval)) {
+        ctx = create_context(cfgdir);
         if (!ctx) {
             SET_ERROR(retval, "Context creation failed.");
         }
@@ -1244,10 +1381,7 @@ int main(int argc, char **argv)
 
     // Validate config.
     if (IS_SUCCESS(retval)) {
-        if (ctx->num_monitored_files == 0) {
-            SET_ERROR(retval, "At least one file to monitor must be specified.");
-        }
-        else if (ctx->num_notifications == 0) {
+        if (ctx->num_notifications == 0) {
             SET_ERROR(retval, "No notification configured.");
         }
         else if (ctx->num_targets == 0) {
@@ -1323,7 +1457,8 @@ int main(int argc, char **argv)
                     if (new_fd >= 0) {
                         DEBUG("%s has %s; following end of new file.",
                             filename, (fd < 0) ? "appeared" : "been replaced");
-                    } else if (fd >= 0) {
+                    }
+                    else if (fd >= 0) {
                         DEBUG("%s has become inaccessible.", filename);
                     }
                     ctx->monitored_files[i].fd = fd = new_fd;
@@ -1385,6 +1520,7 @@ int main(int argc, char **argv)
 
             ctx->monitored_files[i].last_read = get_time();
         }
+        reap_children();
         sleep(MAIN_LOOP_SLEEP_PERIOD);
     }
 
@@ -1394,6 +1530,8 @@ int main(int argc, char **argv)
 
     destroy_context(ctx);
     ctx = NULL;
+
+    reap_children();
 
     return (IS_SUCCESS(retval)) ? EXIT_SUCCESS : EXIT_FAILURE;
 }

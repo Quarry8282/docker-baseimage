@@ -17,6 +17,28 @@ baseimage:
     long-lived application.
   gui: false
   history:
+    - version: 3.4.6
+      date: 2023-03-03
+      changes:
+        fixed:
+          - 'Issue during initialization of Linux users and groups when the `GROUP_ID` is also part of `SUP_GROUP_IDS`.'
+    - version: 3.4.5
+      date: 2023-02-13
+      changes:
+        fixed:
+          - 'Limit the maximum number of opened files on system having a very large, unlimited value.  This prevents unnecessary waste of CPU resources and time for applications trying to close all possible file descriptors.'
+    - version: 3.4.4
+      date: 2023-02-09
+      changes:
+        fixed:
+          - 'Issue handling internal supplementary group IDs by the default `sgid` service file.'
+    - version: 3.4.3
+      date: 2023-01-30
+      changes:
+        fixed:
+          - 'Helper that takes ownership of a directory not handling correctly names with end-of-line character.'
+          - 'The logrotate status file permissions was not set automatically during startup.'
+          - 'Strings `y` and `n` were not considered as valid boolean values.'
     - version: 3.4.2
       date: 2023-01-06
       changes:
@@ -325,7 +347,6 @@ container:
     - name: HOME
       description: Home directory.
       type: internal
-      default: '""'
     - name: XDG_CONFIG_HOME
       description: >-
         Defines the base directory relative to which user specific configuration
@@ -356,14 +377,12 @@ container:
         container.  Packages are installed from the repository of the Linux
         distribution this container is based on.
       type: internal
-      default: '""'
     - name: SUP_GROUP_IDS_INTERNAL
       description: >-
         Comma-separated list of supplementary group IDs of the application.
         These are merged with the ones that might be supplied by
         `SUP_GROUP_IDS`.
       type: internal
-      default: '""'
     - name: USER_ID
       description: >-
         ID of the user the application runs as.  See
@@ -396,7 +415,6 @@ container:
       description: >-
         Comma-separated list of supplementary group IDs of the application.
       type: public
-      default: '""'
     - name: UMASK
       description: >-
         Mask that controls how file permissions are set for newly created files.
@@ -467,7 +485,6 @@ container:
         functionality can be affected when installing a package that overrides
         existing container files (e.g. binaries).
       type: public
-      default: '""'
     - name: CONTAINER_DEBUG
       description: >-
         Set to `1` to enable debug logging.
@@ -493,7 +510,7 @@ container:
         required: true
         mask: false
     - container_path: /storage
-      host_path_example: $HOME
+      host_path_example: /home/user
       description: >-
         This location contains files from your host that need to be accessible
         to the application.

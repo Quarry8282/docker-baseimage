@@ -8,6 +8,8 @@
 #include <pwd.h>
 #include <grp.h>
 #include <poll.h>
+#include <sys/types.h>
+#include <sys/stat.h>
 
 #include "utils.h"
 #include "CException.h"
@@ -479,6 +481,7 @@ void string_to_bool(const char *str, bool *result)
         strcasecmp(str, "true") == 0 ||
         strcasecmp(str, "on") == 0 ||
         strcasecmp(str, "yes") == 0 ||
+        strcasecmp(str, "y") == 0 ||
         strcasecmp(str, "enable") == 0 ||
         strcasecmp(str, "enabled") == 0) {
         // True value.
@@ -488,6 +491,7 @@ void string_to_bool(const char *str, bool *result)
         strcasecmp(str, "false") == 0 ||
         strcasecmp(str, "off") == 0 ||
         strcasecmp(str, "no") == 0 ||
+        strcasecmp(str, "n") == 0 ||
         strcasecmp(str, "disable") == 0 ||
         strcasecmp(str, "disabled") == 0) {
         // False value.
@@ -640,8 +644,11 @@ void string_to_mode(const char *str, mode_t *result)
 
 bool load_value_as_string(const char *filepath, char **buf, size_t bufsize)
 {
+    struct stat fileinfo;
+    int rc = stat(filepath, &fileinfo);
+
     // Check if the file exists and is executable.
-    if (access(filepath, X_OK) == 0) {
+    if (rc == 0 && fileinfo.st_mode & S_IXUSR) {
         // Extract the programe name.
         const char *progname = rindex(filepath, '/');
         if (progname) {
@@ -681,7 +688,7 @@ bool load_value_as_string(const char *filepath, char **buf, size_t bufsize)
         return true;
     }
     // Check if the file exists.
-    else if (access(filepath, F_OK) == 0) {
+    else if (rc == 0) {
         CEXCEPTION_T e;
 
         Try {
@@ -693,6 +700,10 @@ bool load_value_as_string(const char *filepath, char **buf, size_t bufsize)
         return true;
     }
     else {
+        if (errno != ENOENT) {
+            ThrowMessage("could not load '%s': error getting file info: %s",
+                    filepath, strerror(errno));
+        }
         // Config value not set.
         return false;
     }

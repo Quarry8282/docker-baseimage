@@ -16,7 +16,13 @@ group_id_exists() {
 }
 
 group_name_exists() {
-    [ -f /etc/group ] && cat /etc/group | cut -d':' -f1 |grep -q "^$1\$"
+    [ -f /etc/group ] && cat /etc/group | cut -d':' -f1 | grep -q "^$1\$"
+}
+
+get_group_name_from_group_id() {
+    if [ -f /etc/group ]; then
+        cat /etc/group | grep ":x:$1:" | head -n1 | cut -d':' -f1
+    fi
 }
 
 add_group() {
@@ -91,6 +97,7 @@ add_user_to_group() {
 
 # Initialize files.
 rm -f /etc/passwd /etc/group /etc/shadow
+touch /etc/passwd /etc/group /etc/shadow
 
 # Add the 'root' user.
 add_group root 0
@@ -108,7 +115,7 @@ add_user --allow-duplicate app "$USER_ID" "$GROUP_ID"
 add_user_to_group app app
 
 # Handle supplementary groups of user 'app'.
-echo ${SUP_GROUP_IDS:-},${SUP_GROUP_IDS_INTERNAL:-} | tr ',' '\n' | grep -v '^$' | grep -v '^0$' | sort -nub | while read GID
+echo ${SUP_GROUP_IDS:-},${SUP_GROUP_IDS_INTERNAL:-} | tr ',' '\n' | grep -v '^$' | grep -v '^0$' | grep -vw "$GROUP_ID" | sort -nub | while read GID
 do
     case "$GID" in
         (*[!0-9]*)
@@ -118,8 +125,10 @@ do
     esac
     if ! group_id_exists "$GID"; then
         add_group "grp$GID" "$GID"
+        add_user_to_group app "grp$GID"
+    else
+        add_user_to_group app "$(get_group_name_from_group_id "$GID")"
     fi
-    add_user_to_group app "grp$GID"
 done
 
 # Finally, set correct permissions on files.
